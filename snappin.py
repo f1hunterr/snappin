@@ -28,6 +28,9 @@ WS_EX_TOOLWINDOW = 0x80
 GW_OWNER = 4
 SW_RESTORE = 9
 SWP_NOZORDER, SWP_NOACTIVATE = 0x4, 0x10
+SWP_NOSIZE, SWP_NOMOVE = 0x1, 0x2
+WS_EX_TOPMOST = 0x8
+HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
 DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS = 14, 9
 PROCESS_QUERY_LIMITED = 0x1000
 VK_LBUTTON, VK_CONTROL, VK_MENU, VK_P = 0x01, 0x11, 0x12, 0x50
@@ -357,6 +360,11 @@ def enforce(cfg, monitors, skip_hwnd=0):
             if int(idx) < len(zones):
                 targets.append((mi, zone_rect(work, zones[int(idx)]), rule))
     if not targets:
+        for hw in list(_topped):              # nothing pinned any more
+            if user32.IsWindow(hw):
+                user32.SetWindowPos(hw, HWND_NOTOPMOST, 0, 0, 0, 0,
+                                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+            _topped.discard(hw)
         return 0
     for hw in [h for h in _need if not user32.IsWindow(h)]:
         _need.pop(hw, None)
@@ -377,6 +385,19 @@ def enforce(cfg, monitors, skip_hwnd=0):
                                   cands[0])))
 
     rects = elastic_rects(targets, assign, monitors)
+
+    # "Always on top" (DeskPins style) for apps whose rule asks for it
+    want_top = {hw for hw, ti in assign if targets[ti][2].get("top")}
+    for hw in want_top:
+        if not user32.GetWindowLongW(hw, GWL_EXSTYLE) & WS_EX_TOPMOST:
+            user32.SetWindowPos(hw, HWND_TOPMOST, 0, 0, 0, 0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+            _topped.add(hw)           # only undo what we did ourselves
+    for hw in list(_topped - want_top):       # un-pinned / switched off
+        if user32.IsWindow(hw):
+            user32.SetWindowPos(hw, HWND_NOTOPMOST, 0, 0, 0, 0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+        _topped.discard(hw)
 
     for hwnd, ti in assign:
         x, y, w, h = rects[ti]
@@ -404,6 +425,7 @@ def enforce(cfg, monitors, skip_hwnd=0):
 
 
 _need = {}      # hwnd -> (min width, min height) learned by trying
+_topped = set()  # windows SnapPin made always-on-top (so it can undo it)
 
 
 def elastic_rects(targets, assign, monitors):
@@ -587,6 +609,21 @@ def run_ui():
         .grid(row=1, column=0, sticky="w", pady=4)
     ttk.Entry(mid, textvariable=title_var, width=30).grid(row=1, column=1,
                                                           sticky="w", padx=6)
+    top_var = tk.BooleanVar(value=False)
+
+    def on_top_toggle():
+        rule = cur_mon()["zones"].get(str(state["zone"]))
+        if rule is not None:                       # already pinned: apply now
+            rule["top"] = top_var.get()
+            persist()
+            refresh_pinned()
+            status_var.set(("Always on top ON" if top_var.get() else
+                            "Always on top OFF") + f" for {os.path.basename(rule['exe'])}.")
+        else:
+            status_var.set("Applies when you click 'Assign to zone'.")
+    ttk.Checkbutton(mid, text="Keep this app always on top (like DeskPins)",
+                    variable=top_var, command=on_top_toggle).grid(
+                        row=2, column=0, columnspan=3, sticky="w")
     ttk.Button(mid, text="Assign to zone",
                command=lambda: assign()).grid(row=1, column=2)
     ttk.Button(mid, text="Clear zone",
@@ -598,9 +635,9 @@ def run_ui():
     lst = ttk.LabelFrame(root, text="Pinned apps (these stay in their zone)",
                          padding=4)
     lst.pack(fill="both", expand=True, padx=8, pady=2)
-    cols = ("monitor", "zone", "app", "filter", "status")
+    cols = ("monitor", "zone", "app", "filter", "on top", "status")
     tree = ttk.Treeview(lst, columns=cols, show="headings", height=5)
-    for c, wd in zip(cols, (90, 50, 330, 160, 110)):
+    for c, wd in zip(cols, (90, 50, 280, 140, 60, 100)):
         tree.heading(c, text=c.capitalize())
         tree.column(c, width=wd, anchor="w")
     sb = ttk.Scrollbar(lst, orient="vertical", command=tree.yview)
@@ -652,6 +689,7 @@ def run_ui():
                 tree.insert("", "end", iid=f"{mi}:{z}", values=(
                     f"Monitor {mi + 1}", int(z) + 1, os.path.basename(exe),
                     rule.get("title", "") or "(all windows)",
+                    "yes" if rule.get("top") else "",
                     "running" if os.path.basename(exe).lower() in running
                     or exe.lower().endswith("applicationframehost.exe")
                     else "not running"))
@@ -674,6 +712,8 @@ def run_ui():
             mi, z = sel[0].split(":")
             mon_var.set(mon_names[int(mi)])
             state["zone"] = int(z)
+            r = cfg["monitors"][monitors[int(mi)][0]]["zones"].get(z)
+            top_var.set(bool(r and r.get("top")))
             redraw(refresh=False)
     tree.bind("<<TreeviewSelect>>", on_pick)
 
@@ -713,6 +753,7 @@ def run_ui():
                 state["zone"] = i
                 m_rule = m["zones"].get(str(i))
                 title_var.set(m_rule.get("title", "") if m_rule else "")
+                top_var.set(bool(m_rule and m_rule.get("top")))
                 redraw()
                 return
 
@@ -727,7 +768,8 @@ def run_ui():
             # (fallback only: real app couldn't be identified)
             tf = title  # Store apps share one exe - must match by title
             title_var.set(tf)
-        cur_mon()["zones"][str(state["zone"])] = {"exe": exe, "title": tf}
+        cur_mon()["zones"][str(state["zone"])] = {
+            "exe": exe, "title": tf, "top": top_var.get()}
         persist()
         redraw()
         apply_now()

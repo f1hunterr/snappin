@@ -20,6 +20,7 @@ Pure Python standard library (`ctypes` + `tkinter`). No dependencies.
 - **Pin all open apps** - assign every open window to the zone it sits in
 - List of all pinned apps with **Unpin selected**, **Clear zone**, **Clear all**
 - **Launch missing apps**, **Start with Windows** (scheduled task), **Restart**
+- **Always on top** per pinned app (like DeskPins), switchable at any time
 - Closing the window only minimizes it so pinning keeps working;
   `Ctrl+Alt+P` pauses/resumes
 
@@ -44,6 +45,7 @@ The tests open Notepad and a small Tk window on your desktop:
 ```
 python test_snappin.py    # drag / minimize / restore / close+reopen
 python test_elastic.py    # minimum-size app does not overlap its neighbour
+python test_ontop.py      # always-on-top is applied and removed
 ```
 
 ## Limitations
