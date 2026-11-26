@@ -20,6 +20,7 @@ Pure Python standard library (`ctypes` + `tkinter`). No dependencies.
 - **Pin all open apps** - assign every open window to the zone it sits in
 - List of all pinned apps with **Unpin selected**, **Clear zone**, **Clear all**
 - **Launch missing apps**, **Start with Windows** (scheduled task), **Restart**
+- **Several apps in one zone (a stack)**: they share the zone's rectangle; `Ctrl+Alt+Left/Right` over a zone switches the front app, an optional **tab strip** above the zone shows clickable tabs, and the order is yours to set (first app starts in front)
 - **Always on top** per pinned app (like DeskPins), switchable at any time
 - Closing the window only minimizes it so pinning keeps working;
   `Ctrl+Alt+P` pauses/resumes
@@ -46,11 +47,13 @@ The tests open Notepad and a small Tk window on your desktop:
 python test_snappin.py    # drag / minimize / restore / close+reopen
 python test_elastic.py    # minimum-size app does not overlap its neighbour
 python test_ontop.py      # always-on-top is applied and removed
+python test_stack.py      # several apps in one zone: layout, switching, tab-strip room
 ```
 
 ## Limitations
 
 - All windows of a pinned app go to the same zone (e.g. every Chrome window).
+- Two always-on-top apps in the same zone can't be switched between.
 - The layout preview shows normal zone sizes, not boundary shifts.
 - Windows only; uses the Win32 API directly.
 
